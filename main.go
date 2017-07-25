@@ -1,20 +1,26 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
-	"compress/gzip"
-	"regexp"
 )
 
 type Config struct {
 	Httpd struct {
-		Listen    string
+		Http  string
+		Https string
+		Ssl   struct {
+			Key     string
+			Cert    string
+			Enabled bool
+		}
 		Hostname  string
 		Root      string
 		AccessLog string
@@ -36,6 +42,8 @@ func init() {
 type Handler struct {
 	files http.Handler
 }
+
+type SslHandler struct{}
 
 type Log struct {
 	io.Writer
@@ -70,7 +78,7 @@ func main() {
 		writer = os.Stdout
 	}
 
-	http.ListenAndServe(config.Httpd.Listen, Log{
+	handler := Log{
 		Writer: writer,
 		Path:   config.Httpd.AccessLog,
 		Handler: GZip{
@@ -79,7 +87,20 @@ func main() {
 				http.FileServer(http.Dir(config.Httpd.Root)),
 			},
 		},
-	})
+	}
+
+	if config.Httpd.Ssl.Enabled {
+		go func() {
+			http.ListenAndServeTLS(config.Httpd.Https, config.Httpd.Ssl.Cert, config.Httpd.Ssl.Key, handler)
+		}()
+		http.ListenAndServe(config.Httpd.Http, Log{
+			Writer: writer,
+			Path:    config.Httpd.AccessLog,
+			Handler: SslHandler{},
+		})
+	} else {
+		http.ListenAndServe(config.Httpd.Http, handler)
+	}
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +132,13 @@ func (h GZip) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Handler.ServeHTTP(w, r)
+}
+
+func (s SslHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r.URL.Scheme = "https"
+	w.Header().Add("Strict-Transport-Security", "max-age=604800")
+
+	http.Redirect(w, r, r.URL.String(), http.StatusMovedPermanently)
 }
 
 func (l Log) ServeHTTP(w http.ResponseWriter, r *http.Request) {
