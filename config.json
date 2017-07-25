@@ -1,0 +1,8 @@
+{
+	"httpd": {
+		"listen": "0.0.0.0:80",
+		"hostname": "localhost",
+		"root": "public",
+		"gzip": ["html", "css", "js"]
+	}
+}
